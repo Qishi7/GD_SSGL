@@ -26,9 +26,12 @@ fig_dir <- file.path(out_dir, "figures")
 dir.create(fit_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
-Rcpp::sourceCpp(file.path(formal_root, "final_analysis",
-                         "positive_theta_seed_2026100001", "code",
-                         "original_ssgl_ssgl_cpp.cpp"))
+legacy_cpp <- file.path(formal_root, "final_analysis",
+                        "positive_theta_seed_2026100001", "code",
+                        "original_ssgl_ssgl_cpp.cpp")
+if (file.exists(legacy_cpp)) {
+  Rcpp::sourceCpp(legacy_cpp)
+}
 load_newssgl_fast()
 
 alpha_level <- 0.05

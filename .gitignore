@@ -35,6 +35,8 @@ new_method_comparison/**/data/
 new_method_comparison/**/fits/
 new_method_comparison/**/cv/
 new_method_comparison/**/reports/
+new_method_comparison/formal_simulation/main_simulation/**/config/
+new_method_comparison/formal_simulation/main_simulation/**/replicate_seeds.csv
 
 # keep source scripts under script/report directories if explicitly tracked
 !new_method_comparison/**/scripts/
@@ -49,4 +51,3 @@ venv/
 
 # macOS
 .DS_Store
-

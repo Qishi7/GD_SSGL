@@ -67,6 +67,18 @@ Rscript new_method_comparison/tests/compare_newssgl_intercept_samplers.R
 
 The scripts compile the Rcpp samplers on demand using `Rcpp::sourceCpp()`.
 
+To run a complete one-replicate beta0 = 0.5 intercept/SVD example with
+GD-SSGL, WS-SSGL, Gaussian SVC, Bayesian Lasso, and GAM:
+
+```bash
+Rscript new_method_comparison/formal_simulation/main_simulation/four_function_beta0_0p5_one_rep_direct_intercept_svd/scripts/run_beta0_0p5_one_rep.R
+```
+
+This demo writes metrics and PIP summaries under
+`new_method_comparison/formal_simulation/main_simulation/four_function_beta0_0p5_one_rep_direct_intercept_svd/`.
+It is a runnable verification example, not the full per-replicate-tuned
+100-replicate analysis.
+
 ## Main Formal Simulation Runners
 
 Run commands from the repository root. The scripts write outputs under their corresponding `new_method_comparison/formal_simulation/main_simulation/...` folders.
@@ -131,4 +143,3 @@ export GDSSGL_ROOT=/path/to/GD_SSGL
 - GD-SSGL PIPs target **nonconstant spatial-deviation inclusion**.
 - WS-SSGL PIPs target **whole coefficient-surface inclusion**.
 - These two PIP definitions should not be interpreted as the same scientific target.
-
