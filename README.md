@@ -114,6 +114,18 @@ Rscript new_method_comparison/formal_simulation/main_simulation/w6_onbasis_K6_be
 Rscript new_method_comparison/formal_simulation/main_simulation/w6_onbasis_K6_beta0_0p5_intercept_svd_R100/scripts/run_w6_beta0_0p5_intercept_svd_R100.R
 ```
 
+### MGWR simulation extensions
+
+MGWR is fit as a post-hoc extension on frozen replicate datasets produced by
+the main simulation runners. The R implementation uses `GWmodel::gwr.multiscale()`
+with the default formula intercept.
+
+```bash
+Rscript new_method_comparison/formal_simulation/main_simulation/four_function_beta0_0p5_100rep_perrep_tuned_intercept_svd/scripts/run_mgwr_extension_100rep.R --workers=1
+Rscript new_method_comparison/formal_simulation/main_simulation/no_spatial_deviation_beta0_0p5_100rep_perrep_tuned_intercept_svd/scripts/run_mgwr_extension_100rep.R --workers=1
+Rscript new_method_comparison/formal_simulation/main_simulation/correlated_predictor_rho07_beta0_0p5_50rep_perrep_tuned_intercept_svd/scripts/run_mgwr_extension_R50.R --workers=1
+```
+
 ## MODIS Real-data Application
 
 The MODIS data are not included. Set `MODIS_RDATA` to the cleaned `.RData` file before running:
@@ -122,6 +134,29 @@ The MODIS data are not included. Set `MODIS_RDATA` to the cleaned `.RData` file 
 export MODIS_RDATA=/path/to/data_cleaned_small_expanded.RData
 export GDSSGL_ROOT=$(pwd)
 Rscript new_method_comparison/real_data_analysis/modis/scripts/run_modis_intercept_svd_centered_y_cv_tuned_correct.R
+```
+
+MGWR real-data follow-ups are separate because the full multiscale search can be
+slow. The R/GWmodel runner supports `MODIS_MGWR_MODE=auto`,
+`practical_fixedbw`, or `practical_localwls`:
+
+```bash
+export MODIS_RDATA=/path/to/data_cleaned_small_expanded.RData
+export GDSSGL_ROOT=$(pwd)
+MODIS_MGWR_MODE=practical_localwls Rscript new_method_comparison/real_data_analysis/modis/scripts/run_modis_centered_y_mgwr_only_evi_metrics.R
+```
+
+The Python `mgwr` grouped-LC runner expects CSV inputs written by the MODIS
+analysis/preparation pipeline and uses `constant=True` for an explicit
+intercept:
+
+```bash
+export MODIS_RDATA=/path/to/data_cleaned_small_expanded.RData
+export GDSSGL_ROOT=$(pwd)
+PY_MGWR_INPUT_TAG=grouped_lc MODIS_PY_MGWR_LC_ENCODING=grouped_numeric \
+  Rscript new_method_comparison/real_data_analysis/modis/scripts/prepare_modis_centered_y_python_mgwr_inputs.R
+PY_MGWR_INPUT_TAG=grouped_lc PY_MGWR_MIN_BW=4000 PY_MGWR_MAX_ITER_MULTI=1 \
+  python new_method_comparison/real_data_analysis/modis/scripts/run_modis_centered_y_python_mgwr_evi_metrics.py
 ```
 
 Optional map/figure scripts may use Natural Earth shapefiles. Set:
