@@ -1,0 +1,16 @@
+analysis,n_train,rho_x,basis_dimension,theta_strength,u_target_norm,noise_sd,status
+n_sensitivity,350,0,5,1.0,0.5,0.35,not_run
+n_sensitivity,700,0,5,1.0,0.5,0.35,not_run
+n_sensitivity,1400,0,5,1.0,0.5,0.35,not_run
+rho_sensitivity,700,0,5,1.0,0.5,0.35,not_run
+rho_sensitivity,700,0.3,5,1.0,0.5,0.35,not_run
+rho_sensitivity,700,0.6,5,1.0,0.5,0.35,not_run
+basis_sensitivity,700,0,4,1.0,0.5,0.35,not_run
+basis_sensitivity,700,0,5,1.0,0.5,0.35,not_run
+basis_sensitivity,700,0,6,1.0,0.5,0.35,not_run
+signal_sensitivity,700,0,5,1.0,0.25,0.35,not_run
+signal_sensitivity,700,0,5,1.0,0.5,0.35,not_run
+signal_sensitivity,700,0,5,1.0,1.0,0.35,not_run
+noise_sensitivity,700,0,5,1.0,0.5,0.2,not_run
+noise_sensitivity,700,0,5,1.0,0.5,0.35,not_run
+noise_sensitivity,700,0,5,1.0,0.5,0.5,not_run

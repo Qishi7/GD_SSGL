@@ -1,0 +1,23 @@
+Package: GDSSGLCode
+Type: Project
+Title: Global plus Spatial-Deviation SSGL Reproducible Code
+Version: 0.1.0
+Description: Reproducible research code for GD-SSGL simulations and MODIS real-data analysis.
+Encoding: UTF-8
+Depends:
+    R (>= 4.2.0)
+Imports:
+    Rcpp,
+    RcppArmadillo,
+    GIGrvg,
+    mgcv,
+    MASS,
+    Matrix,
+    splines,
+    sp,
+    sf,
+    ggplot2
+LinkingTo:
+    Rcpp,
+    RcppArmadillo
+

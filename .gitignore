@@ -1,0 +1,52 @@
+# R / RStudio
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# compiled artifacts
+*.o
+*.so
+*.dll
+*.dylib
+*.rds
+*.RData
+
+# generated outputs
+results/
+results_debug/
+figures/
+plots/
+logs/
+data/
+fits/
+cv/
+reports/
+current result/
+以前的replica结果/
+
+# generated outputs under experiment folders
+new_method_comparison/**/results/
+new_method_comparison/**/results_debug/
+new_method_comparison/**/figures/
+new_method_comparison/**/plots/
+new_method_comparison/**/logs/
+new_method_comparison/**/data/
+new_method_comparison/**/fits/
+new_method_comparison/**/cv/
+new_method_comparison/**/reports/
+
+# keep source scripts under script/report directories if explicitly tracked
+!new_method_comparison/**/scripts/
+!new_method_comparison/**/scripts/**
+!new_method_comparison/formal_simulation/configs/*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
