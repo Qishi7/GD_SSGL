@@ -54,7 +54,7 @@ active_surface <- c(TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
 fold_seed <- 123L
 cv_mcmc <- list(n_iter = 500L, burn_in = 100L)
 final_mcmc <- list(
-  proposed = list(n_iter = 10000L, burn_in = 3000L, chains = 1L),
+  proposed = list(n_iter = 5000L, burn_in = 2000L, chains = 3L),
   original = list(n_iter = 5000L, burn_in = 2000L, chains = 3L),
   full_svc = list(n_iter = 5000L, burn_in = 2000L, chains = 3L),
   blasso = list(n_iter = 5000L, burn_in = 2000L, chains = 3L)
@@ -348,16 +348,55 @@ tune_one_replicate <- function(rep_id, dat, rep_out) {
   list(fit_results = fit_results, summary = config_summary, selected = selected)
 }
 
-fit_gd_final <- function(dat, cfg, seed) {
-  fit_newssgl_intercept_fast(
-    dat$train, dat$test, dat$grid,
-    list(n_basis = cfg$K, full_rank_centered = TRUE, full_rank_method = "svd"),
-    list(lambda0 = cfg$lambda0, lambda1 = cfg$lambda1,
-         a_sigma = 0.5, b_sigma = var(dat$train$y) / 2,
-         a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
-    list(n_iter = final_mcmc$proposed$n_iter,
-         burn_in = final_mcmc$proposed$burn_in),
-    seed
+fit_gd_final <- function(dat, cfg, seed_base) {
+  started <- proc.time()[3]
+  chains <- lapply(seq_len(final_mcmc$proposed$chains), function(ch) {
+    fit_newssgl_intercept_fast(
+      dat$train, dat$test, dat$grid,
+      list(n_basis = cfg$K, full_rank_centered = TRUE, full_rank_method = "svd"),
+      list(lambda0 = cfg$lambda0, lambda1 = cfg$lambda1,
+           a_sigma = 0.5, b_sigma = var(dat$train$y) / 2,
+           a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
+      list(n_iter = final_mcmc$proposed$n_iter,
+           burn_in = final_mcmc$proposed$burn_in),
+      seed_base + ch
+    )
+  })
+  meta <- chains[[1]]$config$basis
+  theta <- do.call(cbind, lapply(chains, `[[`, "theta_draws"))
+  alpha <- do.call(cbind, lapply(chains, function(x) x$diagnostics$alpha_draws))
+  gamma <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_draws))
+  gamma_prob <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_prob_draws))
+  beta0 <- unlist(lapply(chains, `[[`, "beta0_draws"))
+  theta_mean <- rowMeans(theta)
+  alpha_mean <- rowMeans(alpha)
+  beta0_mean <- mean(beta0)
+  phi_test <- apply_phi(dat$test$coords, meta)
+  phi_grid <- apply_phi(dat$grid$coords, meta)
+  beta_test <- surface_theta_alpha(theta_mean, alpha_mean, phi_test, p)
+  beta_grid <- surface_theta_alpha(theta_mean, alpha_mean, phi_grid, p)
+  list(
+    method_name = "GD-SSGL",
+    theta_mean = theta_mean,
+    theta_draws = theta,
+    pip = rowMeans(gamma),
+    beta_hat_grid = beta_grid,
+    u_hat_grid = sweep(beta_grid, 2, theta_mean, "-"),
+    pred_test = beta0_mean + rowSums(dat$test$X * beta_test),
+    runtime = proc.time()[3] - started,
+    diagnostics = list(
+      beta0_mean = beta0_mean,
+      beta0_draws = beta0,
+      rb_pip = rowMeans(gamma_prob),
+      gamma_draws = gamma,
+      gamma_prob_draws = gamma_prob,
+      alpha_draws = alpha,
+      chain_count = final_mcmc$proposed$chains
+    ),
+    config = list(basis = meta, mcmc = final_mcmc$proposed),
+    beta0_mean = beta0_mean,
+    beta0_draws = beta0,
+    alpha_mean = alpha_mean
   )
 }
 

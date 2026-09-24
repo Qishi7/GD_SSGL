@@ -108,6 +108,57 @@ metric_row <- function(method, pred_test, beta_grid, theta_hat, u_grid, data,
   )
 }
 
+fit_gd_three_chain <- function(data) {
+  started <- proc.time()[3]
+  chains <- lapply(1:3, function(ch) {
+    fit_newssgl_intercept_fast(
+      data$train, data$test, data$grid,
+      list(n_basis = K, full_rank_centered = TRUE, full_rank_method = "svd"),
+      list(lambda0 = 20, lambda1 = 2, a_sigma = 0.5,
+           b_sigma = var(data$train$y) / 2,
+           a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
+      list(n_iter = 5000L, burn_in = 2000L),
+      seeds$proposed_seed + ch
+    )
+  })
+  meta <- chains[[1]]$config$basis
+  theta <- do.call(cbind, lapply(chains, `[[`, "theta_draws"))
+  alpha <- do.call(cbind, lapply(chains, function(x) x$diagnostics$alpha_draws))
+  gamma <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_draws))
+  gamma_prob <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_prob_draws))
+  beta0 <- unlist(lapply(chains, `[[`, "beta0_draws"))
+  theta_mean <- rowMeans(theta)
+  alpha_mean <- rowMeans(alpha)
+  beta0_mean <- mean(beta0)
+  phi_test <- apply_phi(data$test$coords, meta)
+  phi_grid <- apply_phi(data$grid$coords, meta)
+  beta_test <- surface_theta_alpha(theta_mean, alpha_mean, phi_test, p)
+  beta_grid <- surface_theta_alpha(theta_mean, alpha_mean, phi_grid, p)
+  list(
+    method_name = "GD-SSGL",
+    theta_mean = theta_mean,
+    theta_draws = theta,
+    pip = rowMeans(gamma),
+    beta_hat_grid = beta_grid,
+    u_hat_grid = sweep(beta_grid, 2, theta_mean, "-"),
+    pred_test = beta0_mean + rowSums(data$test$X * beta_test),
+    runtime = proc.time()[3] - started,
+    diagnostics = list(
+      beta0_mean = beta0_mean,
+      beta0_draws = beta0,
+      rb_pip = rowMeans(gamma_prob),
+      gamma_draws = gamma,
+      gamma_prob_draws = gamma_prob,
+      alpha_draws = alpha,
+      chain_count = 3L
+    ),
+    config = list(basis = meta, mcmc = list(n_iter = 5000L, burn_in = 2000L, chains = 3L)),
+    beta0_mean = beta0_mean,
+    beta0_draws = beta0,
+    alpha_mean = alpha_mean
+  )
+}
+
 fit_original_three_chain <- function(data) {
   started <- proc.time()[3]
   chains <- lapply(1:3, function(ch) {
@@ -239,15 +290,7 @@ data$truth$beta0 <- true_beta0
 saveRDS(data, file.path(out_root, "data", "beta0_0p5_rep001_data.rds"))
 
 cat("GD-SSGL...\n")
-gd <- fit_newssgl_intercept_fast(
-  data$train, data$test, data$grid,
-  list(n_basis = K, full_rank_centered = TRUE, full_rank_method = "svd"),
-  list(lambda0 = 20, lambda1 = 2, a_sigma = 0.5,
-       b_sigma = var(data$train$y) / 2,
-       a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
-  list(n_iter = 10000L, burn_in = 3000L),
-  seeds$proposed_seed
-)
+gd <- fit_gd_three_chain(data)
 saveRDS(gd, file.path(out_root, "fits", "gdssgl_fit.rds"))
 
 cat("WS-SSGL...\n")

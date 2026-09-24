@@ -35,8 +35,9 @@ active_u <- c(3L, 4L, 5L, 6L)
 predictor_names <- paste0("X", seq_len(p))
 lambda0 <- 20
 lambda1 <- 2
-n_iter <- 10000L
-burn_in <- 3000L
+n_iter <- 5000L
+burn_in <- 2000L
+n_chains <- 3L
 data_seed <- 2026100002L
 mcmc_seed <- 2026410001L
 
@@ -56,6 +57,7 @@ writeLines(c(
   sprintf("lambda1: %.0f", lambda1),
   sprintf("n_iter: %d", n_iter),
   sprintf("burn_in: %d", burn_in),
+  sprintf("chains: %d", n_chains),
   "thin: 1",
   "sampler: fit_newssgl_intercept_fast direct scalar beta0",
   "basis: SVD full-rank centered basis, Phi_full = Phi_c %*% V_r",
@@ -236,17 +238,72 @@ write.csv(validation_checks, file.path(out_root, "results",
           row.names = FALSE)
 if (!all(validation_checks$pass)) stop("Validation failed; not fitting.")
 
-started <- proc.time()[3]
-fit <- fit_newssgl_intercept_fast(
-  data_obj$train, data_obj$test, data_obj$grid,
-  list(n_basis = K_B, full_rank_centered = TRUE, full_rank_method = "svd"),
-  list(lambda0 = lambda0, lambda1 = lambda1, a_sigma = 0.5,
-       b_sigma = var(y_train) / 2, a_theta = 1, b_theta = 1,
-       a_gamma = 1, b_gamma = 10),
-  list(n_iter = n_iter, burn_in = burn_in),
-  mcmc_seed
-)
-runtime_sec <- proc.time()[3] - started
+surface_theta_alpha <- function(theta, alpha, phi, p) {
+  h <- ncol(phi)
+  out <- matrix(0, nrow(phi), p)
+  for (j in seq_len(p)) {
+    idx <- ((j - 1L) * h + 1L):(j * h)
+    out[, j] <- theta[j] + as.vector(phi %*% alpha[idx])
+  }
+  out
+}
+
+fit_gd_three_chain <- function() {
+  started <- proc.time()[3]
+  chains <- lapply(seq_len(n_chains), function(ch) {
+    fit_newssgl_intercept_fast(
+      data_obj$train, data_obj$test, data_obj$grid,
+      list(n_basis = K_B, full_rank_centered = TRUE, full_rank_method = "svd"),
+      list(lambda0 = lambda0, lambda1 = lambda1, a_sigma = 0.5,
+           b_sigma = var(y_train) / 2, a_theta = 1, b_theta = 1,
+           a_gamma = 1, b_gamma = 10),
+      list(n_iter = n_iter, burn_in = burn_in),
+      mcmc_seed + ch
+    )
+  })
+  meta <- chains[[1]]$config$basis
+  theta <- do.call(cbind, lapply(chains, `[[`, "theta_draws"))
+  alpha <- do.call(cbind, lapply(chains, function(x) x$diagnostics$alpha_draws))
+  gamma <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_draws))
+  gamma_prob <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_prob_draws))
+  beta0 <- unlist(lapply(chains, `[[`, "beta0_draws"))
+  theta_mean <- rowMeans(theta)
+  alpha_mean <- rowMeans(alpha)
+  beta0_mean <- mean(beta0)
+  phi_test <- apply_centered_basis_metadata_fullrank(data_obj$test$coords, meta)
+  phi_grid <- apply_centered_basis_metadata_fullrank(data_obj$grid$coords, meta)
+  beta_test <- surface_theta_alpha(theta_mean, alpha_mean, phi_test, p)
+  beta_grid <- surface_theta_alpha(theta_mean, alpha_mean, phi_grid, p)
+  fit <- list(
+    method_name = "GD-SSGL intercept SVD W6",
+    theta_mean = theta_mean,
+    theta_draws = theta,
+    pip = rowMeans(gamma),
+    beta_hat_grid = beta_grid,
+    u_hat_grid = sweep(beta_grid, 2, theta_mean, "-"),
+    pred_test = beta0_mean + rowSums(data_obj$test$X * beta_test),
+    runtime = proc.time()[3] - started,
+    diagnostics = list(
+      beta0_mean = beta0_mean,
+      beta0_draws = beta0,
+      rb_pip = rowMeans(gamma_prob),
+      gamma_draws = gamma,
+      gamma_prob_draws = gamma_prob,
+      alpha_draws = alpha,
+      chain_count = n_chains
+    ),
+    config = list(basis = meta, mcmc = list(n_iter = n_iter, burn_in = burn_in,
+                                            chains = n_chains)),
+    beta0_mean = beta0_mean,
+    beta0_draws = beta0,
+    alpha_mean = alpha_mean
+  )
+  fit$runtime_sec_external <- fit$runtime
+  fit
+}
+
+fit <- fit_gd_three_chain()
+runtime_sec <- fit$runtime
 saveRDS(fit, file.path(out_root, "replicate_fits", "replicate_001",
                        "gdssgl_intercept_svd_fit.rds"))
 

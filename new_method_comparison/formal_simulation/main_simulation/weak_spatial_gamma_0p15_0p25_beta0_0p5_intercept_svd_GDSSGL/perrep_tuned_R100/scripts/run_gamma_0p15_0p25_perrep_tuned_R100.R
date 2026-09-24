@@ -60,7 +60,7 @@ predictor_names <- paste0("X", seq_len(p))
 K_values <- c(4L, 5L, 6L)
 fold_seed <- 123L
 cv_mcmc <- list(n_iter = 500L, burn_in = 100L)
-final_mcmc <- list(n_iter = 10000L, burn_in = 3000L)
+final_mcmc <- list(n_iter = 5000L, burn_in = 2000L, chains = 3L)
 grid_size <- 50L
 grid_coords <- as.matrix(expand.grid(
   s1 = seq(0, 1, length.out = grid_size),
@@ -279,17 +279,74 @@ summarize_cv <- function(cv_rows) {
             out$candidate_id), , drop = FALSE]
 }
 
+apply_phi <- function(coords, meta) {
+  if (isTRUE(meta$full_rank_centered)) {
+    apply_centered_basis_metadata_fullrank(coords, meta)
+  } else {
+    apply_basis_metadata(coords, meta)
+  }
+}
+
+surface_theta_alpha <- function(theta, alpha, phi, p) {
+  h <- ncol(phi)
+  out <- matrix(0, nrow(phi), p)
+  for (j in seq_len(p)) {
+    idx <- ((j - 1L) * h + 1L):(j * h)
+    out[, j] <- theta[j] + as.vector(phi %*% alpha[idx])
+  }
+  out
+}
+
 fit_final <- function(dat, cfg, gamma, rep_id) {
-  seed <- 2040200000L + as.integer(round(gamma * 1000)) * 10000L + rep_id
-  fit_newssgl_intercept_fast(
-    dat$train, dat$test, dat$grid,
-    list(n_basis = cfg$K, full_rank_centered = TRUE,
-         full_rank_method = "svd"),
-    list(lambda0 = cfg$lambda0, lambda1 = cfg$lambda1,
-         a_sigma = 0.5, b_sigma = var(dat$train$y) / 2,
-         a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
-    final_mcmc,
-    seed
+  seed_base <- 2040200000L + as.integer(round(gamma * 1000)) * 10000L + rep_id
+  started <- proc.time()[3]
+  chains <- lapply(seq_len(final_mcmc$chains), function(ch) {
+    fit_newssgl_intercept_fast(
+      dat$train, dat$test, dat$grid,
+      list(n_basis = cfg$K, full_rank_centered = TRUE,
+           full_rank_method = "svd"),
+      list(lambda0 = cfg$lambda0, lambda1 = cfg$lambda1,
+           a_sigma = 0.5, b_sigma = var(dat$train$y) / 2,
+           a_theta = 1, b_theta = 1, a_gamma = 1, b_gamma = 10),
+      list(n_iter = final_mcmc$n_iter, burn_in = final_mcmc$burn_in),
+      seed_base + ch
+    )
+  })
+  meta <- chains[[1]]$config$basis
+  theta <- do.call(cbind, lapply(chains, `[[`, "theta_draws"))
+  alpha <- do.call(cbind, lapply(chains, function(x) x$diagnostics$alpha_draws))
+  gamma_draws <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_draws))
+  gamma_prob <- do.call(cbind, lapply(chains, function(x) x$diagnostics$gamma_prob_draws))
+  beta0 <- unlist(lapply(chains, `[[`, "beta0_draws"))
+  theta_mean <- rowMeans(theta)
+  alpha_mean <- rowMeans(alpha)
+  beta0_mean <- mean(beta0)
+  phi_test <- apply_phi(dat$test$coords, meta)
+  phi_grid <- apply_phi(dat$grid$coords, meta)
+  beta_test <- surface_theta_alpha(theta_mean, alpha_mean, phi_test, p)
+  beta_grid <- surface_theta_alpha(theta_mean, alpha_mean, phi_grid, p)
+  list(
+    method_name = "GD-SSGL",
+    theta_mean = theta_mean,
+    theta_draws = theta,
+    pip = rowMeans(gamma_draws),
+    beta_hat_grid = beta_grid,
+    u_hat_grid = sweep(beta_grid, 2, theta_mean, "-"),
+    pred_test = beta0_mean + rowSums(dat$test$X * beta_test),
+    runtime = proc.time()[3] - started,
+    diagnostics = list(
+      beta0_mean = beta0_mean,
+      beta0_draws = beta0,
+      rb_pip = rowMeans(gamma_prob),
+      gamma_draws = gamma_draws,
+      gamma_prob_draws = gamma_prob,
+      alpha_draws = alpha,
+      chain_count = final_mcmc$chains
+    ),
+    config = list(basis = meta, mcmc = final_mcmc),
+    beta0_mean = beta0_mean,
+    beta0_draws = beta0,
+    alpha_mean = alpha_mean
   )
 }
 
