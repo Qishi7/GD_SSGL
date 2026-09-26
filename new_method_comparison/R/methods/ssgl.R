@@ -24,3 +24,10 @@ load_newssgl_intercept_entry <- function(rebuild = FALSE) {
   load_newssgl_intercept_fast(rebuild = rebuild)
   invisible(TRUE)
 }
+
+load_matched_wsssgl_intercept_entry <- function(rebuild = FALSE) {
+  source(file.path(.ssgl_root, "R", "methods", "accelerated",
+                   "matched_wsssgl_intercept.R"))
+  load_matched_wsssgl_intercept_fast(rebuild = rebuild)
+  invisible(TRUE)
+}
