@@ -94,6 +94,28 @@ grid_coefficients <- function(fit, grid_coords, p) {
   list(intercept = coef_grid[, 1], beta = beta)
 }
 
+extract_mgwr_bandwidths <- function(fit, p) {
+  terms <- c("Intercept", paste0("X", seq_len(p)))
+  bw <- if (!is.null(fit$GW.arguments$bws)) {
+    fit$GW.arguments$bws
+  } else if (!is.null(fit$GW.arguments$bw)) {
+    fit$GW.arguments$bw
+  } else {
+    rep(NA_real_, length(terms))
+  }
+  bw <- as.numeric(bw)
+  if (length(bw) == 1L) bw <- rep(bw, length(terms))
+  if (length(bw) != length(terms)) {
+    length(bw) <- length(terms)
+  }
+  data.frame(
+    term = terms,
+    bandwidth = bw,
+    is_intercept = terms == "Intercept",
+    stringsAsFactors = FALSE
+  )
+}
+
 run_one_rep <- function(rep_id) {
   rep_tag <- sprintf("rep_%03d", rep_id)
   rep_dir <- file.path(out_root, "fits", rep_tag)
@@ -150,13 +172,8 @@ run_one_rep <- function(rep_id) {
 
     d <- fit$SDF@data
     intercept_col <- intersect(c("Intercept", "(Intercept)"), names(d))[1]
-    bw <- if (!is.null(fit$GW.arguments$bws)) {
-      fit$GW.arguments$bws
-    } else if (!is.null(fit$GW.arguments$bw)) {
-      fit$GW.arguments$bw
-    } else {
-      NA_real_
-    }
+    bandwidths <- extract_mgwr_bandwidths(fit, p)
+    intercept_bandwidth <- bandwidths$bandwidth[bandwidths$is_intercept][1]
 
     metrics <- data.frame(
       replicate = rep_id,
@@ -183,7 +200,10 @@ run_one_rep <- function(rep_id) {
       terms_intercept = has_formula_intercept,
       sdf_has_intercept = !is.na(intercept_col),
       intercept_column = intercept_col,
-      bandwidth_summary = paste(signif(as.numeric(bw), 6), collapse = ";"),
+      intercept_bandwidth = intercept_bandwidth,
+      max_possible_adaptive_bandwidth = nrow(dat$train$X),
+      intercept_bandwidth_fraction = intercept_bandwidth / nrow(dat$train$X),
+      bandwidth_summary = paste(signif(bandwidths$bandwidth, 6), collapse = ";"),
       stringsAsFactors = FALSE
     )
     by_predictor <- data.frame(
@@ -199,6 +219,7 @@ run_one_rep <- function(rep_id) {
     )
     atomic_write_csv(metrics, file.path(rep_dir, "mgwr_metrics.csv"))
     atomic_write_csv(by_predictor, file.path(rep_dir, "mgwr_by_predictor.csv"))
+    atomic_write_csv(bandwidths, file.path(rep_dir, "mgwr_bandwidths.csv"))
     out <- list(metrics = metrics, by_predictor = by_predictor,
                 status = data.frame(replicate = rep_id, status = "success",
                                     error_message = "", stringsAsFactors = FALSE))
@@ -251,6 +272,7 @@ metric_names <- c("mspe", "rmse", "mae", "bias", "beta_mise",
                   "mise_global_only", "mise_spatial_only",
                   "mise_global_plus_spatial", "mise_null",
                   "theta_mse", "u_mise_x3_x6", "beta0_hat",
+                  "intercept_bandwidth", "intercept_bandwidth_fraction",
                   "runtime_sec", "postprocess_runtime_sec",
                   "total_runtime_sec")
 summary <- do.call(rbind, lapply(metric_names, function(nm) {

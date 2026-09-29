@@ -60,17 +60,14 @@ def main():
     input_mid = f"_{input_tag}" if input_tag else ""
     train = pd.read_csv(DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_train.csv")
     test = pd.read_csv(DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_test.csv")
-    metadata = pd.read_csv(DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_metadata.csv")
-    y_train_mean = float(metadata.loc[metadata["key"] == "y_train_mean", "value"].iloc[0])
-
     x_cols = [c for c in train.columns if c not in ("y_centered", "y_log", "EVI", "s1", "s2")]
     coords_train = train[["s1", "s2"]].to_numpy(float)
     coords_test = test[["s1", "s2"]].to_numpy(float)
-    y = train[["y_centered"]].to_numpy(float)
+    y = train[["y_log"]].to_numpy(float)
     x_train = train[x_cols].to_numpy(float)
     x_test = test[x_cols].to_numpy(float)
 
-    method = "MGWR (Python mgwr)" if not input_tag else f"MGWR (Python mgwr, {input_tag})"
+    method = "MGWR (Python mgwr, spatial intercept)" if not input_tag else f"MGWR (Python mgwr, spatial intercept, {input_tag})"
     started = time.time()
     selector = Sel_BW(
         coords_train,
@@ -112,12 +109,11 @@ def main():
 
     coef_train = np.asarray(results.params, dtype=float)
     coef_test = idw_coefficients(coords_train, coef_train, coords_test)
-    pred_log_centered = coef_test[:, 0] + np.sum(x_test * coef_test[:, 1:], axis=1)
-    pred_log = pred_log_centered + y_train_mean
+    pred_log = coef_test[:, 0] + np.sum(x_test * coef_test[:, 1:], axis=1)
     pred_evi = np.exp(pred_log) - 1.0
     obs_log = test["y_log"].to_numpy(float)
     obs_evi = test["EVI"].to_numpy(float)
-    beta0_hat = float(np.mean(coef_test[:, 0]) + y_train_mean)
+    beta0_hat = float(np.mean(coef_test[:, 0]))
 
     pred_df = pd.DataFrame({
         "method": method,
@@ -130,27 +126,26 @@ def main():
         "s1": coords_test[:, 0],
         "s2": coords_test[:, 1],
     })
-    pred_path = DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_predictions.csv"
+    pred_path = DATA_DIR / f"modis_standard_mgwr_spatial_intercept_python{input_mid}_predictions.csv"
     pred_df.to_csv(pred_path, index=False)
 
     metrics = pd.DataFrame([
         metric_row(method, obs_log, pred_log, runtime_sec, "log(EVI+1)", beta0_hat),
         metric_row(method, obs_evi, pred_evi, runtime_sec, "EVI", beta0_hat),
     ])
-    metrics_path = DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_prediction_metrics_log_and_evi_scale.csv"
+    metrics_path = DATA_DIR / f"modis_standard_mgwr_spatial_intercept_python{input_mid}_prediction_metrics_log_and_evi_scale.csv"
     metrics.to_csv(metrics_path, index=False)
 
-    primary_metrics_path = DATA_DIR / f"modis_centered_y_mgwr{input_mid}_prediction_metrics_log_and_evi_scale.csv"
+    primary_metrics_path = DATA_DIR / f"modis_standard_mgwr_spatial_intercept{input_mid}_prediction_metrics_log_and_evi_scale.csv"
     metrics.to_csv(primary_metrics_path, index=False)
 
-    fit_path = RESULTS_DIR / f"mgwr_intercept_centered_y_python_mgwr{input_mid}_fit.pkl"
+    fit_path = RESULTS_DIR / f"mgwr_standard_spatial_intercept_python_mgwr{input_mid}_fit.pkl"
     with fit_path.open("wb") as f:
         pickle.dump({
             "method": method,
             "bws": np.asarray(bws).tolist(),
             "params": coef_train,
             "x_cols": x_cols,
-            "y_train_mean": y_train_mean,
             "runtime_sec": runtime_sec,
             "selector": selector,
             "summary": {
@@ -162,8 +157,13 @@ def main():
             },
         }, f)
 
-    diag_path = DATA_DIR / f"modis_centered_y_mgwr_python{input_mid}_bandwidths.csv"
-    pd.DataFrame({"term": ["Intercept"] + x_cols, "bandwidth": np.asarray(bws, dtype=float)}).to_csv(diag_path, index=False)
+    bandwidths = pd.DataFrame({
+        "term": ["Intercept"] + x_cols,
+        "bandwidth": np.asarray(bws, dtype=float),
+        "is_intercept": [True] + [False] * len(x_cols),
+    })
+    diag_path = DATA_DIR / f"modis_standard_mgwr_spatial_intercept_python{input_mid}_bandwidths.csv"
+    bandwidths.to_csv(diag_path, index=False)
 
     all_evi_path = DATA_DIR / "modis_n10000_centered_y_check_prediction_metrics_evi_scale.csv"
     if all_evi_path.exists():
@@ -182,23 +182,23 @@ def main():
         }])
         combined = pd.concat([all_evi, mgwr_evi_out[all_evi.columns]], ignore_index=True)
         combined = combined.sort_values("MSPE_EVI")
-        combined.to_csv(DATA_DIR / f"modis_n10000_centered_y_check_prediction_metrics_evi_scale_with_mgwr_python{input_mid}.csv", index=False)
+        combined.to_csv(DATA_DIR / f"modis_n10000_standard_mgwr_spatial_intercept_prediction_metrics_evi_scale_with_mgwr_python{input_mid}.csv", index=False)
 
-    report_path = REPORTS_DIR / f"modis_centered_y_mgwr_python{input_mid}_evi_metrics_report.md"
+    report_path = REPORTS_DIR / f"modis_standard_mgwr_spatial_intercept_python{input_mid}_evi_metrics_report.md"
     report_path.write_text(
-        "# MODIS centered-y MGWR Python EVI-scale metrics\n\n"
+        "# MODIS standard MGWR spatial-intercept Python EVI-scale metrics\n\n"
         f"- Output root: `{OUT_ROOT}`.\n"
         f"- Input tag: `{input_tag if input_tag else 'default_p15_dummy_lc'}`.\n"
         "- Implementation: Python `mgwr` package with multiscale bandwidth selection.\n"
-        "- Fit response: centered `log(EVI+1)`.\n"
-        "- Intercept: included via `constant=True`.\n"
+        "- Fit response: raw `log(EVI+1)`.\n"
+        "- Intercept: included via `constant=True`; MGWR estimates a spatially varying intercept and selects its bandwidth.\n"
         "- Prediction: IDW interpolation of fitted training-location local coefficients to test locations.\n"
         f"- Minimum adaptive bandwidth allowed during selection: {min_bw} nearest neighbors.\n"
         f"- Maximum multiscale iterations: {max_iter_multi}.\n"
-        f"- Training response mean added back before EVI transform: {y_train_mean:.12f}.\n"
+        f"- Selected intercept bandwidth: {float(np.asarray(bws, dtype=float)[0]):.6f}.\n"
         f"- Runtime sec: {runtime_sec:.3f}.\n\n"
         "## Bandwidths\n\n"
-        + pd.DataFrame({"term": ["Intercept"] + x_cols, "bandwidth": np.asarray(bws, dtype=float)}).to_markdown(index=False)
+        + bandwidths.to_markdown(index=False)
         + "\n\n## Metrics\n\n"
         + metrics.to_markdown(index=False)
         + "\n"
@@ -213,7 +213,7 @@ def main():
         "report_path": str(report_path),
         "runtime_sec": runtime_sec,
     }
-    (RESULTS_DIR / f"mgwr_intercept_centered_y_python_mgwr{input_mid}_status.json").write_text(json.dumps(status, indent=2))
+    (RESULTS_DIR / f"mgwr_standard_spatial_intercept_python_mgwr{input_mid}_status.json").write_text(json.dumps(status, indent=2))
     print(json.dumps(status, indent=2))
 
 

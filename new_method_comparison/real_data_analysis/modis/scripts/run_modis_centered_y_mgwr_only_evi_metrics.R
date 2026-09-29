@@ -48,7 +48,7 @@ on.exit({
   try(close(zz), silent = TRUE)
 }, add = TRUE)
 
-cat("\nMODIS centered-y MGWR-only run started:", format(Sys.time()), "\n")
+cat("\nMODIS standard MGWR spatial-intercept run started:", format(Sys.time()), "\n")
 cat("MGWR mode:", mgwr_mode, "\n")
 cat("MGWR nlower:", mgwr_nlower, "\n")
 cat("MGWR warm-start bws0:", ifelse(is.na(mgwr_bws0), "NULL", mgwr_bws0), "\n")
@@ -115,6 +115,26 @@ extract_mgwr_coef <- function(fit, p) {
   out <- as.matrix(d[, c(intercept_col, x_cols), drop = FALSE])
   colnames(out) <- c("Intercept", x_cols)
   out
+}
+
+extract_mgwr_bandwidths <- function(fit, p) {
+  terms <- c("Intercept", paste0("X", seq_len(p)))
+  bw <- if (!is.null(fit$GW.arguments$bws)) {
+    fit$GW.arguments$bws
+  } else if (!is.null(fit$GW.arguments$bw)) {
+    fit$GW.arguments$bw
+  } else {
+    rep(NA_real_, length(terms))
+  }
+  bw <- as.numeric(bw)
+  if (length(bw) == 1L) bw <- rep(bw, length(terms))
+  if (length(bw) != length(terms)) length(bw) <- length(terms)
+  data.frame(
+    term = terms,
+    bandwidth = bw,
+    is_intercept = terms == "Intercept",
+    stringsAsFactors = FALSE
+  )
 }
 
 idw_coefficients <- function(train_coords, coef_mat, new_coords, power = 2) {
@@ -222,8 +242,7 @@ test_indices <- which(split_df$split == "test")
 
 train_y_raw <- log(sample_data$EVI[train_indices] + 1)
 test_y_raw <- log(sample_data$EVI[test_indices] + 1)
-y_train_mean <- mean(train_y_raw)
-train_y <- train_y_raw - y_train_mean
+train_y <- train_y_raw
 
 lc <- make_lc_dummy_design(sample_data$LC_Type4[train_indices], sample_data$LC_Type4[test_indices])
 train_X_raw <- cbind(as.matrix(sample_data[train_indices, continuous_vars]), lc$train)
@@ -236,11 +255,11 @@ colnames(train_coords) <- c("s1", "s2")
 colnames(test_coords) <- c("s1", "s2")
 
 validation <- data.frame(
-  check = c("same_split_file_exists", "train_y_centered", "x_train_means_zero",
+  check = c("same_split_file_exists", "train_y_is_raw_log_response", "x_train_means_zero",
             "x_train_sds_one", "mgwr_formula_has_default_intercept"),
   pass = c(
     file.exists(file.path(raw_run_root, "data", "modis_n10000_intercept_svd_train_test_split.csv")),
-    abs(mean(train_y)) < 1e-14,
+    isTRUE(all.equal(train_y, train_y_raw)),
     max(abs(colMeans(scaled_X$train))) < 1e-10,
     max(abs(apply(scaled_X$train, 2, sd) - 1)) < 1e-10,
     attr(stats::terms(as.formula(paste("y ~", paste(paste0("X", seq_len(ncol(scaled_X$train))),
@@ -248,12 +267,13 @@ validation <- data.frame(
   ),
   stringsAsFactors = FALSE
 )
-write_csv(validation, file.path(out_root, "data", "modis_centered_y_mgwr_validation.csv"))
+write_csv(validation, file.path(out_root, "data", "modis_standard_mgwr_spatial_intercept_validation.csv"))
 if (!all(validation$pass)) stop("MGWR validation failed.")
 
-fit_path <- file.path(out_root, "results", paste0("mgwr_intercept_centered_y", suffix, "_fit.rds"))
-pred_path <- file.path(out_root, "data", paste0("modis_centered_y_mgwr", suffix, "_predictions.csv"))
-metrics_path <- file.path(out_root, "data", paste0("modis_centered_y_mgwr", suffix, "_prediction_metrics_log_and_evi_scale.csv"))
+fit_path <- file.path(out_root, "results", paste0("mgwr_standard_spatial_intercept", suffix, "_fit.rds"))
+pred_path <- file.path(out_root, "data", paste0("modis_standard_mgwr_spatial_intercept", suffix, "_predictions.csv"))
+metrics_path <- file.path(out_root, "data", paste0("modis_standard_mgwr_spatial_intercept", suffix, "_prediction_metrics_log_and_evi_scale.csv"))
+bandwidth_path <- file.path(out_root, "data", paste0("modis_standard_mgwr_spatial_intercept", suffix, "_bandwidths.csv"))
 
 formula_obj <- as.formula(
   paste("y ~", paste(paste0("X", seq_len(ncol(scaled_X$train))), collapse = " + "))
@@ -282,7 +302,7 @@ if (file.exists(fit_path)) {
     )
     runtime <- proc.time()[3] - st
     coef_test <- lw$coef_test
-    pred_log_centered <- lw$pred
+    pred_log <- lw$pred
   } else {
     train_spdf <- make_spdf(scaled_X$train, train_y, train_coords)
     mgwr_var_n <- ncol(scaled_X$train) + 1L
@@ -308,25 +328,45 @@ if (file.exists(fit_path)) {
     runtime <- proc.time()[3] - st
     coef_train <- extract_mgwr_coef(fit, ncol(scaled_X$train))
     coef_test <- idw_coefficients(sp::coordinates(fit$SDF), coef_train, test_coords)
-    pred_log_centered <- as.numeric(coef_test[, "Intercept"] +
-                                      rowSums(scaled_X$test * coef_test[, -1, drop = FALSE]))
+    pred_log <- as.numeric(coef_test[, "Intercept"] +
+                                  rowSums(scaled_X$test * coef_test[, -1, drop = FALSE]))
   }
   obj <- list(
     fit = fit,
     formula = paste(deparse(formula_obj), collapse = " "),
     intercept_attr = attr(stats::terms(formula_obj), "intercept"),
-    y_train_mean = y_train_mean,
-    pred_test_log_centered = pred_log_centered,
-    pred_test_log = pred_log_centered + y_train_mean,
-    pred_test_evi = exp(pred_log_centered + y_train_mean) - 1,
-    beta0_centered_mean = mean(coef_test[, "Intercept"]),
-    beta0_raw_log_scale_mean = mean(coef_test[, "Intercept"]) + y_train_mean,
+    pred_test_log = pred_log,
+    pred_test_evi = exp(pred_log) - 1,
+    beta0_spatial_intercept_mean = mean(coef_test[, "Intercept"]),
     runtime_sec = runtime,
     var_names = var_names,
     mgwr_mode = mgwr_mode
   )
+  if (mgwr_mode == "practical_localwls") {
+    bandwidths <- data.frame(
+      term = c("Intercept", paste0("X", seq_len(ncol(scaled_X$train)))),
+      bandwidth = NA_real_,
+      is_intercept = c(TRUE, rep(FALSE, ncol(scaled_X$train))),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    bandwidths <- extract_mgwr_bandwidths(fit, ncol(scaled_X$train))
+  }
+  obj$bandwidths <- bandwidths
+  obj$intercept_bandwidth <- bandwidths$bandwidth[bandwidths$is_intercept][1]
   save_rds_atomic(obj, fit_path)
 }
+if (is.null(obj$bandwidths)) {
+  if (!is.null(obj$fit) && !identical(obj$mgwr_mode, "practical_localwls")) {
+    obj$bandwidths <- extract_mgwr_bandwidths(obj$fit, length(obj$var_names))
+  } else {
+    obj$bandwidths <- data.frame(term = c("Intercept", paste0("X", seq_along(obj$var_names))),
+                                 bandwidth = NA_real_,
+                                 is_intercept = c(TRUE, rep(FALSE, length(obj$var_names))))
+  }
+  obj$intercept_bandwidth <- obj$bandwidths$bandwidth[obj$bandwidths$is_intercept][1]
+}
+write_csv(obj$bandwidths, bandwidth_path)
 
 observed_evi <- sample_data$EVI[test_indices]
 method_label <- switch(
@@ -350,9 +390,9 @@ write_csv(pred_df, pred_path)
 
 metrics <- rbind(
   metric_row(method_label, test_y_raw, obj$pred_test_log, obj$runtime_sec,
-             "log(EVI+1)", beta0_hat = obj$beta0_raw_log_scale_mean),
+             "log(EVI+1)", beta0_hat = obj$beta0_spatial_intercept_mean),
   metric_row(method_label, observed_evi, obj$pred_test_evi, obj$runtime_sec,
-             "EVI", beta0_hat = obj$beta0_raw_log_scale_mean)
+             "EVI", beta0_hat = obj$beta0_spatial_intercept_mean)
 )
 write_csv(metrics, metrics_path)
 
@@ -373,11 +413,11 @@ if (file.exists(all_evi_path)) {
   )
   combined <- rbind(all_evi, mgwr_evi_out[, names(all_evi)])
   combined <- combined[order(combined$MSPE_EVI), ]
-  write_csv(combined, file.path(out_root, "data", paste0("modis_n10000_centered_y_check_prediction_metrics_evi_scale_with_mgwr", suffix, ".csv")))
+  write_csv(combined, file.path(out_root, "data", paste0("modis_n10000_standard_mgwr_spatial_intercept_prediction_metrics_evi_scale_with_mgwr", suffix, ".csv")))
 }
 
 writeLines(c(
-  "# MODIS centered-y MGWR EVI-scale metrics",
+  "# MODIS standard MGWR spatial-intercept EVI-scale metrics",
   "",
   paste0("- Output root: `", out_root, "`."),
   paste0("- MGWR mode: `", mgwr_mode, "`."),
@@ -385,20 +425,20 @@ writeLines(c(
   paste0("- MGWR warm-start `bws0`: ", ifelse(is.na(mgwr_bws0), "NULL", mgwr_bws0), "."),
   paste0("- MGWR `hatmatrix`: ", mgwr_hatmatrix, "."),
   paste0("- MGWR `force.armadillo`: ", mgwr_force_armadillo, "."),
-  "- MGWR was fit on centered `log(EVI+1)` using an explicit-intercept formula.",
+  "- MGWR was fit on raw `log(EVI+1)` using the standard spatially varying intercept from `gwr.multiscale()`.",
   paste0("- Formula: `", obj$formula, "`."),
   paste0("- Formula intercept attribute: ", obj$intercept_attr, "."),
-  paste0("- Training response mean added back before EVI transform: ", sprintf("%.12f", obj$y_train_mean), "."),
+  paste0("- Selected intercept bandwidth: ", sprintf("%.6f", obj$intercept_bandwidth), "."),
   "- EVI-scale predictions use `exp(predicted_log) - 1`.",
   "",
   "## Metrics",
   "",
   paste(capture.output(print(metrics, row.names = FALSE)), collapse = "\n")
-), file.path(out_root, "reports", paste0("modis_centered_y_mgwr", suffix, "_evi_metrics_report.md")))
+), file.path(out_root, "reports", paste0("modis_standard_mgwr_spatial_intercept", suffix, "_evi_metrics_report.md")))
 
 cat("\nMGWR metrics:\n")
 print(metrics, row.names = FALSE)
 cat("\nSaved fit:", fit_path, "\n")
 cat("Saved metrics:", metrics_path, "\n")
-cat("Report:", file.path(out_root, "reports", paste0("modis_centered_y_mgwr", suffix, "_evi_metrics_report.md")), "\n")
-cat("MODIS centered-y MGWR-only run finished:", format(Sys.time()), "\n")
+cat("Report:", file.path(out_root, "reports", paste0("modis_standard_mgwr_spatial_intercept", suffix, "_evi_metrics_report.md")), "\n")
+cat("MODIS standard MGWR spatial-intercept run finished:", format(Sys.time()), "\n")
